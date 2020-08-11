@@ -3342,9 +3342,334 @@ FastAPI可与任何数据库和任何样式的库一起使用，以与数据库�
 - SQLAlchemy ORM
 - Peewee
 
+### 创建SQLAlchemy
+
+> sql_app/database.py
+
+```
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./sql_app.db"
+# SQLALCHEMY_DATABASE_URL = "postgresql://user:password@postgresserver/db"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+```
+
+**注意：**参数
+
+```
+connect_args={"check_same_thread": False}
+```
+
+仅仅`SQLite`数据库需要，其他数据库不需要
+
+> **技术细节**
+>
+> 默认情况下，假定每个线程将处理一个独立的请求，SQLite将仅允许一个线程与其通信。
+>
+> 这是为了防止为不同的事情（针对不同的请求）共享同一连接。
+>
+> 但是在FastAPI中，使用正常功能（def），可以针对同一请求使用多个线程与数据库进行交互，所以我们知道了SQLite为什么需要`connect_args={"check_same_thread": False}`
+>
+> 另外，我们将确保每个请求都具有依赖关系，从而获得其自己的数据库连接会话，因此不需要该默认机制。
+
+### 创建数据库model文件
+
+> sql_app/models.py
+
+```
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
+
+from .database import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    is_active = Column(Boolean, default=True)
+
+    items = relationship("Item", back_populates="owner")
+
+
+class Item(Base):
+    __tablename__ = "items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    description = Column(String, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"))
+
+    owner = relationship("User", back_populates="items")
+```
+
+使用`relationship`创建关系，使用model时会给我们提供很多便利的方法
 
 
 
+### 创建初始的Pydantic models/schemas
+
+```
+from typing import List, Optional
+
+from pydantic import BaseModel
 
 
+class ItemBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+
+
+class ItemCreate(ItemBase):
+    """request body schema"""
+    pass
+
+
+class Item(ItemBase):
+    """response schema"""
+    id: int
+    owner_id: int
+
+    class Config:
+        orm_mode = True     # # 将告诉Pydantic模型读取数据，即使它不是dict而是ORM模型（或任何其他具有属性的任意对象）。
+
+
+class UserBase(BaseModel):
+    email: str
+
+
+class UserCreate(UserBase):
+    """request body schema"""
+    password: str
+
+
+class User(UserBase):
+    """response schema"""
+    id: int
+    is_active: bool
+    items: List[Item] = []
+
+    class Config:
+        orm_mode = True     # 将告诉Pydantic模型读取数据，即使它不是dict而是ORM模型（或任何其他具有属性的任意对象）。
+```
+
+Pydantic的`orm_mode`将告诉Pydantic模型读取数据，即使它不是`dict`而是`ORM模型`（或任何其他具有属性的任意对象）。
+
+这样，不是仅尝试从字典获取id值，如：
+
+```
+id = data["id"]
+```
+
+它还将尝试从属性获取它，如：
+
+```
+id = data.id
+```
+
+因此，Pydantic模型与ORM兼容，您可以在路径操作中的`response_model`参数中声明它。
+
+您将能够返回数据库模型, 并且数据从数据库模型中序列化。
+
+SQLAlchemy和许多其他默认情况下是“延迟加载”。
+
+#### Technical Details about ORM mode
+
+例如，这意味着除非您尝试访问将包含该数据的属性，否则它们不会从数据库中获取关系数据。
+
+例如，访问属性`items`
+
+```
+current_user.items
+```
+
+这时候SQLAlchemy将会去`items`表，获取这个用户的`items`，而不会提前获取好。
+
+如果没有`orm_mode`，则如果您从路径操作返回了SQLAlchemy模型，则该模型将不包含关系数据。
+
+即使您在Pydantic模型中声明了这些关系。
+
+但是在ORM模式下，由于Pydantic本身会尝试从属性访问其所需的数据（而不是假设一个字典），因此您可以声明要返回的特定数据，并且即使从ORM中也可以获取该数据。 
+
+### CRUD utils
+
+> sql_app/crud.py
+
+```
+from sqlalchemy.orm import Session
+
+from . import models, schemas
+
+
+def get_user(db: Session, user_id: int):
+    return db.query(models.User).filter(models.User.id == user_id).first()
+
+
+def get_user_by_email(db: Session, email: str):
+    return db.query(models.User).filter(models.User.email == email).first()
+
+
+def get_users(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(models.User).offset(skip).limit(limit).all()
+
+
+def create_user(db: Session, user: schemas.UserCreate):
+    fake_hashed_password = user.password + "notreallyhashed"
+    db_user = models.User(email=user.email, hashed_password=fake_hashed_password)
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def get_items(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(models.Item).offset(skip).limit(limit).all()
+
+
+def create_user_item(db: Session, item: schemas.ItemCreate, user_id: int):
+    db_item = models.Item(**item.dict(), owner_id=user_id)
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return db_item
+```
+
+> sql_app/main.py
+
+### Main FastAPI app
+
+```
+"""
+[参考资料](https://fastapi.tiangolo.com/tutorial/sql-databases/)
+"""
+from typing import List
+
+from fastapi import Depends, FastAPI, HTTPException, Response, Request
+from sqlalchemy.orm import Session
+
+from . import crud, models, schemas
+from .database import SessionLocal, engine
+
+models.Base.metadata.create_all(bind=engine)    # 通常，您可能会使用Alembic初始化数据库（创建表等）
+
+app = FastAPI()
+
+
+@app.middleware("http")
+async def db_session_middleware(request: Request, call_next):
+    response = Response("Internal server error", status_code=500)
+    try:
+        request.state.db = SessionLocal()
+        response = await call_next(request)
+    except Exception as e:
+        print('出现异常', e)
+        return response
+    finally:
+        request.state.db.close()
+    return response
+
+
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@app.post("/users/", response_model=schemas.User)
+def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    """创建用户"""
+    db_user = crud.get_user_by_email(db, email=user.email)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    return crud.create_user(db=db, user=user)
+
+
+@app.get("/users/", response_model=List[schemas.User])
+def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """用户列表"""
+    users = crud.get_users(db, skip=skip, limit=limit)
+    print('users[0].items', users[0].items)
+    return users
+
+
+@app.get("/users/{user_id}", response_model=schemas.User)
+def read_user(user_id: int, db: Session = Depends(get_db)):
+    """用户详情"""
+    db_user = crud.get_user(db, user_id=user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return db_user
+
+
+@app.post("/users/{user_id}/items/", response_model=schemas.Item)
+def create_item_for_user(
+        user_id: int, item: schemas.ItemCreate, db: Session = Depends(get_db)
+):
+    """创建用户item"""
+    return crud.create_user_item(db=db, item=item, user_id=user_id)
+
+
+@app.get("/items/", response_model=List[schemas.Item])
+def read_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """item列表"""
+    items = crud.get_items(db, skip=skip, limit=limit)
+    return items
+```
+
+### check it
+
+```
+uvicorn sql_app.main:app --reload
+```
+
+
+
+### 使用中间件来连接关闭数据库连接
+
+If you can't use dependencies with `yield` -- for example, if you are not using **Python 3.7** and can't install the "backports" mentioned above for **Python 3.6** -- you can set up the session in a "middleware" in a similar way.
+
+```
+@app.middleware("http")
+async def db_session_middleware(request: Request, call_next):
+    response = Response("Internal server error", status_code=500)
+    try:
+        request.state.db = SessionLocal()
+        response = await call_next(request)
+    finally:
+        request.state.db.close()
+    return response
+```
+
+**Dependencies with `yield` or middleware**
+
+Adding a **middleware** here is similar to what a dependency with `yield` does, with some differences:
+
+- It requires more code and is a bit more complex.
+
+- The middleware has to be an`async` function.
+    - If there is code in it that has to "wait" for the network, it could "block" your application there and degrade performance a bit.
+    - Although it's probably not very problematic here with the way `SQLAlchemy` works.
+    - But if you added more code to the middleware that had a lot of I/O waiting, it could then be problematic.
+
+- A middleware is run for every request.
+
+  - So, a connection will be created for every request.
+  - Even when the *path operation* that handles that request didn't need the DB.
+
+> **Tip**
+>
+> 当依赖关系足以满足用例时，最好将依赖关系与yield一起使用。
 
