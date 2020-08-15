@@ -3673,3 +3673,121 @@ Adding a **middleware** here is similar to what a dependency with `yield` does, 
 >
 > 当依赖关系足以满足用例时，最好将依赖关系与yield一起使用。
 
+
+
+## 多应用模块
+
+如果要构建应用程序或Web API，则很少将所有内容都放在一个文件中。
+
+FastAPI提供了一种方便的工具，可在保持所有灵活性的同时构建应用程序。
+
+> 如果您来自Flask，那将相当于Flask的蓝图。
+
+### 一个简单的文件结构
+
+```
+.
+├── app											// 包含所有的代码
+│   ├── __init__.py					// 所以app是一个”Python package“
+│   ├── main.py
+│   └── routers
+│       ├── __init__.py
+│       ├── items.py				// 子模块items
+│       └── users.py				// 子模块users
+```
+
+```
+# routers/users.py
+from fastapi import APIRouter
+
+router = APIRouter()
+
+
+@router.get("/users/", tags=["users"])
+async def read_users():
+    return [{"username": "Foo"}, {"username": "Bar"}]
+
+
+@router.get("/users/me", tags=["users"])
+async def read_user_me():
+    return {"username": "fakecurrentuser"}
+
+
+@router.get("/users/{username}", tags=["users"])
+async def read_user(username: str):
+    return {"username": username}
+```
+
+> **Tip**
+>
+> 你可以认为`APIRouter`是一个"mini `FastAPI`" 类
+>
+> 支持所有相同的支持操作
+>
+> All the same parameters, responses, dependencies, tags, etc.
+
+```
+# routers/items.py
+from fastapi import APIRouter, HTTPException
+
+router = APIRouter()
+
+
+@router.get("/")
+async def read_items():
+    return [{"name": "Item Foo"}, {"name": "item Bar"}]
+
+
+@router.get("/{item_id}")
+async def read_item(item_id: str):
+    return {"name": "Fake Specific Item", "item_id": item_id}
+
+
+@router.put(
+    "/{item_id}",
+    tags=["custom"],    # 增加了一个tag, 将会在交互式文档里体现
+    responses={4003: {"description": "Operation forbidden"}},    # 将会叠加进 `include_router`的`responses`。并在交互式文档里体现
+)
+async def update_item(item_id: str):
+    if item_id != "foo":
+        raise HTTPException(status_code=403, detail="You can only update the item: foo")
+    return {"item_id": item_id, "name": "The Fighters"}
+
+```
+
+```
+# main.py
+from fastapi import Depends, FastAPI, Header, HTTPException
+
+from routers import users, items
+
+app = FastAPI()
+
+
+async def get_token_header(x_token: str = Header(...)):
+    if x_token != "fake-super-secret-token":
+        raise HTTPException(status_code=400, detail="X-Token header invalid")
+
+
+app.include_router(users.router)    # 使用app.include_router（），我们可以将APIRouter添加到主FastAPI应用程序中
+
+# 前缀，标签，响应和依赖项参数（在许多其他情况下）只是FastAPI的一项功能，可帮助您避免代码重复。
+app.include_router(
+    items.router,
+    prefix="/items",    # 注意：/items   后面不要添加 /
+    tags=["items"],
+    dependencies=[Depends(get_token_header)],
+    responses={404: {"description": "Not found"}},
+)
+```
+
+### 多次包含具有不同前缀的同一路由器
+
+> 您也可以在同一路由器上使用.include_router（）多次使用不同的前缀。
+>
+> 例如，在不同的前缀下公开相同的API（例如， `/api/v1`和 `/api/latest`
+>
+> 这是您可能真正不需要的高级用法，但是如果您有需要，可以使用。
+
+
+
