@@ -1629,6 +1629,7 @@ async def create_item(name: str):
 - `3xx重定向` 带有这些状态码的回复可能带有或没有正文，除了`304“ Not Modified”`,不能有一个正文。
 
 - `4xx客户端错误` 这些是您可能最常使用的第二种类型。
+
   - 对于“未找到”响应，示例为`404`
   - 对于来自客户端的一般错误，您可以仅使用`400`
 
@@ -3788,6 +3789,90 @@ app.include_router(
 > 例如，在不同的前缀下公开相同的API（例如， `/api/v1`和 `/api/latest`
 >
 > 这是您可能真正不需要的高级用法，但是如果您有需要，可以使用。
+
+
+
+## 后台任务
+
+您可以定义返回响应后要运行的后台任务。
+
+这对于在请求后需要执行的操作很有用，但是客户端实际上并不需要在接收响应之前等待操作完成。
+
+**例如**：
+
+- 执行操作后发送的电子邮件通知：
+  - 由于连接到电子邮件服务器并发送电子邮件的过程通常很慢（几秒钟），因此您可以立即返回响应并在后台发送电子邮件通知。
+- 处理数据：
+  - 例如，假设您收到的文件必须经过缓慢的处理，您可以返回“Accepted”（HTTP 202）响应，并在后台对其进行处理。
+
+### 使用`BackgroundTasks`
+
+```
+import time
+
+from fastapi import BackgroundTasks, FastAPI
+
+app = FastAPI()
+
+
+def write_notification(email: str, message=""):
+    with open("log.txt", mode="w") as email_file:
+        print('开始处理notification')
+        time.sleep(5)
+        content = f"notification for {email}: {message}"
+        email_file.write(content)
+        print('终于搞定了')
+
+
+@app.post("/send-notification/{email}")
+async def send_notification(email: str, background_tasks: BackgroundTasks):
+    background_tasks.add_task(write_notification, email, message="some notification")
+    return {"message": "Notification sent in the background"}
+```
+
+### 依赖注入
+
+使用`BackgroundTasks`还可以与依赖项注入系统一起使用，可以在多个级别上声明`BackgroundTasks`类型的参数：在路径操作函数中，在依赖项（可依赖），在子依赖项中，等等。
+
+**FastAPI**知道在每种情况下该怎么做以及如何重用同一对象，以便所有后台任务合并在一起，然后在后台运行：
+
+```
+from typing import Optional
+
+from fastapi import BackgroundTasks, Depends, FastAPI
+
+app = FastAPI()
+
+
+def write_log(message: str):
+    with open("log.txt", mode="a") as log:
+        log.write(message)
+
+
+def get_query(background_tasks: BackgroundTasks, q: Optional[str] = None):
+    if q:
+        message = f"found query: {q}\n"
+        background_tasks.add_task(write_log, message)
+    return q
+
+
+@app.post("/send-notification/{email}")
+async def send_notification(
+    email: str, background_tasks: BackgroundTasks, q: str = Depends(get_query)
+):
+    message = f"message to {email}\n"
+    background_tasks.add_task(write_log, message)
+    return {"message": "Message sent"}
+
+```
+
+**警告**
+
+如果您需要执行大量的后台计算，而不必一定要在同一进程中运行它（例如，您不需要共享内存，变量等），则可能会受益于使用其他更大的工具，例如 **Celery**
+
+它们往往需要更复杂的配置，例如RabbitMQ或Redis等消息/作业队列管理器，但是它们允许您在多个进程（尤其是多个服务器）中运行后台任务。
+
+但是，如果您需要从同一个FastAPI应用程序访问变量和对象，或者需要执行小的后台任务（例如发送电子邮件通知），则只需使用`BackgroundTasks`
 
 
 
