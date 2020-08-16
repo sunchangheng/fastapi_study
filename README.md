@@ -230,9 +230,16 @@ http://127.0.0.1:8000/items/foo?short=yes/no
 > ```
 
 ```
+from typing import Optional
+
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
 @app.get("/users/{user_id}/items/{item_id}")
 async def read_user_item(
-    item_id: str, user_id: int, short: bool = False,  q: Optional[str] = None
+    user_id: int, item_id: str, q: Optional[str] = None, short: bool = False
 ):
     item = {"item_id": item_id, "owner_id": user_id}
     if q:
@@ -251,6 +258,11 @@ async def read_user_item(
 > http://localhost:8000/items3/foo_item?needy=hello
 
 ```
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
 @app.get("/items/{item_id}")
 async def read_user_item(item_id: str, needy: str):
     item = {"item_id": item_id, "needy": needy}
@@ -262,6 +274,13 @@ async def read_user_item(item_id: str, needy: str):
 当然你也可以传一些必传的，一些可选的。**必传的要在可选的前面声明**
 
 ```
+from typing import Optional
+
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
 @app.get("/items/{item_id}")
 async def read_user_item(
     item_id: str, needy: str, skip: int = 0, limit: Optional[int] = None
@@ -334,12 +353,25 @@ async def create_item(item: Item):
 你可以同时设置路径参数和请求体。
 
 ```
-@app.put('/goods/{goods_id}/')
-def update_goods(goods_id: int, goods: Goods):
-    """更新一个产品"""
-    print('获取到产品', goods)
+from typing import Optional
 
-    return {'goods_id': goods_id, **goods.dict()}
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+
+
+app = FastAPI()
+
+
+@app.put("/items/{item_id}")
+async def create_item(item_id: int, item: Item):
+    return {"item_id": item_id, **item.dict()}
 ```
 
 ### 请求体 + 路径参数 + 请求参数
@@ -347,13 +379,27 @@ def update_goods(goods_id: int, goods: Goods):
 你甚至可以三个一起组合
 
 ```
-@app.put('/goods/{goods_id}/')
-def update_goods(goods_id: int, goods: Goods, q: str = None):
-    """更新一个产品"""
-    result = {"item_id": goods_id, **goods.dict()}
-    if q:
-        result.update({'q': q})
+from typing import Optional
 
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+
+
+app = FastAPI()
+
+
+@app.put("/items/{item_id}")
+async def create_item(item_id: int, item: Item, q: Optional[str] = None):
+    result = {"item_id": item_id, **item.dict()}
+    if q:
+        result.update({"q": q})
     return result
 ```
 
@@ -368,6 +414,13 @@ def update_goods(goods_id: int, goods: Goods, q: str = None):
 ### 额外的请求体参数传递
 
 ```
+from typing import Optional
+
+from fastapi import FastAPI, Query
+
+app = FastAPI()
+
+
 @app.put('/goods/{goods_id}/')
 def update_goods(goods_id: int, goods: Goods, q: str = None, other_q: int=Body(11)):
     """更新一个产品"""
@@ -396,6 +449,13 @@ def update_goods(goods_id: int, goods: Goods, q: str = None, other_q: int=Body(1
 **FastAPI** 允许你声明其他其他信息和验证你的信息
 
 ```
+from typing import Optional
+
+from fastapi import FastAPI, Query
+
+app = FastAPI()
+
+
 @app.get('/book')
 def read_book(q: Optional[str] = Query(default=None, max_length=10)):   # 添加验证
         print('获取到的参数', q)
@@ -439,6 +499,13 @@ q: str = Query(..., min_length=3)
 ### 请求参数列表/多个值
 
 ```
+from typing import Optional
+
+from fastapi import FastAPI, Query
+
+app = FastAPI()
+
+
 # 请求参数获取多个值
 @app.get('/class/')
 def read_class(q: Optional[List[str]] = Query(None)):
@@ -493,6 +560,11 @@ def read_class(q: list = Query(["foo", "bar"])):
 > http://localhost:8000/book/2?item-query=哈哈
 
 ```
+from fastapi import FastAPI, Path
+
+app = FastAPI()
+
+
 @app.get('/book/{book_id}')
 def get_book(
         book_id: int = Path(..., title='The id of the item to get'),
@@ -539,11 +611,16 @@ async def read_items(
     return results
 ```
 
-## 数字验证：大于或等于
+### 数字验证：大于或等于
 
 > localhost:8000/food/2/?q=hello
 
 ```
+from fastapi import FastAPI, Path
+
+app = FastAPI()
+
+
 @app.get('/food/{item_id}')
 def get_food(*, item_id: int = Path(3, gt=2, le=10), q: str):
     data = {'q': q, 'item_id': item_id}
@@ -559,22 +636,58 @@ def get_food(*, item_id: int = Path(3, gt=2, le=10), q: str):
 
 **这个验证器同样适用于`float`类型的参数**
 
+```
+from fastapi import FastAPI, Path, Query
+
+app = FastAPI()
+
+
+@app.get("/items/{item_id}")
+async def read_items(
+    *,
+    item_id: int = Path(..., title="The ID of the item to get", ge=0, le=1000),
+    q: str,
+    size: float = Query(..., gt=0, lt=10.5)
+):
+    results = {"item_id": item_id}
+    if q:
+        results.update({"q": q})
+    return results
+```
+
 ## body 更多的参数
 
 ### 路径参数 + 请求参数 + 请求体
 
 ```
-@app.put('/lesson/{lesson_id}')
-def read_lesson(
-        lesson: Lesson,
-        limit: str = Query(...),
-        lesson_id: int = Path(...),
-):
-    print(locals())
-    print(lesson.__dict__)
+from typing import Optional
 
-    data = {'limit': limit, 'lesson_id': lesson_id, **lesson.dict()}
-    return data
+from fastapi import FastAPI, Path
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+
+
+@app.put("/items/{item_id}")
+async def update_item(
+    *,
+    item_id: int = Path(..., title="The ID of the item to get", ge=0, le=1000),
+    q: Optional[str] = None,
+    item: Optional[Item] = None,
+):
+    results = {"item_id": item_id}
+    if q:
+        results.update({"q": q})
+    if item:
+        results.update({"item": item})
+    return results
 ```
 
 
@@ -601,6 +714,30 @@ def read_lesson(
 ```
 
 ```
+from typing import Optional
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Lesson(BaseModel):
+    id: int
+    desc: str
+    image: str = None
+    
+class User(BaseModel):
+    name: str = Field(..., min_length=5, max_length=32)
+    password: str
+    email: str = Field(..., )
+    # tags: list = []
+    # tags: List[str] = []    # 指定列表里面的类型
+    tags: Set[str] = set()
+    # avatar: Optional[Image] = None
+    avatar: Optional[List[Image]] = None
+
+
 @app.post('/lesson/{lesson_id}')
 def create_lesson(
         *,  # 为了规范语法
@@ -642,6 +779,20 @@ def create_lesson(
 ```
 
 ```
+from typing import Optional
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Lesson(BaseModel):
+    id: int
+    desc: str
+    image: str = None
+
+
 @app.put('/lesson1/')
 def lesson1(lesson: Lesson = Body(..., embed=True)):
     print('locals', locals())
@@ -656,18 +807,27 @@ def lesson1(lesson: Lesson = Body(..., embed=True)):
 您可以使用`Query`，`Path`和`Body`在路径操作函数参数中声明其他验证和元数据的方式相同，也可以使用`Pydantic`的`Field`在`Pydantic Model`内部声明验证和元数据。
 
 ```
-class User(BaseModel):
-    name: str = Field(..., min_length=5, max_length=32)
-    password: str
-    email: str = Field(..., )
+from typing import Optional
+
+from fastapi import Body, FastAPI
+from pydantic import BaseModel, Field
+
+app = FastAPI()
 
 
-@app.post('/user/')
-def create_user(user: User):
-    print('user', user.__dict__)
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = Field(
+        None, title="The description of the item", max_length=300
+    )
+    price: float = Field(..., gt=0, description="The price must be greater than zero")
+    tax: Optional[float] = None
 
-    data = {'code': 1, 'data': {'user': user}}
-    return data
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item = Body(..., embed=True)):
+    results = {"item_id": item_id, "item": item}
+    return results
 ```
 
 ## body 嵌套模型
@@ -675,28 +835,51 @@ def create_user(user: User):
 ### 列表嵌套
 
 ```
-class User(BaseModel):
-    name: str = Field(..., min_length=5, max_length=32)
-    password: str
-    email: str = Field(..., )
-    tag: list = []
+from typing import Optional
 
-@app.put('/user/')
-def edit_user(user: User):
-    return {'user': user}
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+    tags: list = []		# 列表嵌套
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item):
+    results = {"item_id": item_id, "item": item}
+    return results
 ```
 
 ### 列表嵌套 - 指定列表元素类型
 
 ```
-from typing import List
+from typing import List, Optional
 
-class User(BaseModel):
-    name: str = Field(..., min_length=5, max_length=32)
-    password: str
-    email: str = Field(..., )
-    # tags: list = []
-    tags: List[str] = []    # 指定列表里面的类型
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+    tags: List[str] = []		# 指定列表元素类型
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item):
+    results = {"item_id": item_id, "item": item}
+    return results
 ```
 
 ### 集合类型
@@ -704,19 +887,26 @@ class User(BaseModel):
 但是随后我们考虑了一下，意识到标签不应该重复，它们可能是唯一的字符串。
 
 ```
-from typing import Set
+from typing import Optional, Set
 
-class User(BaseModel):
-    name: str = Field(..., min_length=5, max_length=32)
-    password: str
-    email: str = Field(..., )
-    # tags: list = []
-    # tags: List[str] = []    # 指定列表里面的类型
-    tags: Set[str] = set()
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-@app.put('/user/')
-def edit_user(user: User):
-    return {'user': user}
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+    tags: Set[str] = set()		# 集合类型
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item):
+    results = {"item_id": item_id, "item": item}
+    return results
 ```
 
 **注意**：当你接收到一个重复的数据时，这也会转换成一组唯一的数据。
@@ -726,30 +916,47 @@ def edit_user(user: User):
 每一个`Pydantic Model `的属性都有类型
 
 ```
-class Image(BaseModel):
+from typing import Optional, Set
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Image(BaseModel):		# 嵌套类型
     url: str
     name: str
 
 
-class User(BaseModel):
-    name: str = Field(..., min_length=5, max_length=32)
-    password: str
-    email: str = Field(..., )
-    avatar: Optional[Image] = None
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+    tags: Set[str] = []
+    image: Optional[Image] = None		# 嵌套类型
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item):
+    results = {"item_id": item_id, "item": item}
+    return results
 ```
 
 `FastAPI`期望得到以下格式的回复
 
 ```
 {
-   "name": "su111",
-   "password": "xxxx",
-   "email": "hello world",
-   "tags": ["3", "5", 1,1 ],
-   "avatar": {
-      "url": "https://google.com/",
-      "name": "google"
-   }
+    "name": "Foo",
+    "description": "The pretender",
+    "price": 42.0,
+    "tax": 3.2,
+    "tags": ["rock", "metal", "bar"],
+    "image": {
+        "url": "http://example.com/baz.jpg",
+        "name": "The Foo live"
+    }
 }
 ```
 
@@ -758,11 +965,32 @@ class User(BaseModel):
 除了普通的类型`int` `str` `float`等之外，你可以使用从`str`继承的更复杂的单一类型。
 
 ```
+from typing import Optional, Set
+
+from fastapi import FastAPI
 from pydantic import BaseModel, HttpUrl
 
+app = FastAPI()
+
+
 class Image(BaseModel):
-    url: HttpUrl
+    url: HttpUrl		# 特殊的类型和验证
     name: str
+
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+    tags: Set[str] = []
+    image: Optional[Image] = None
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item):
+    results = {"item_id": item_id, "item": item}
+    return results
 ```
 
 该字符串将被检查为有效的URL，并在JSON Schema / OpenAPI中进行记录。
@@ -770,46 +998,71 @@ class Image(BaseModel):
 ### 带有子模型的类型属性
 
 ```
+from typing import List, Optional, Set
+
+from fastapi import FastAPI
+from pydantic import BaseModel, HttpUrl
+
+app = FastAPI()
+
+
 class Image(BaseModel):
     url: HttpUrl
     name: str
 
 
-class User(BaseModel):
-    name: str = Field(..., min_length=5, max_length=32)
-    password: str
-    email: str = Field(..., )
-    # tags: list = []
-    # tags: List[str] = []    # 指定列表里面的类型
-    # tags: Set[str] = set()
-    # avatar: Optional[Image] = None
-    avatar: Optional[List[Image]] = None
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+    tags: Set[str] = []
+    images: Optional[List[Image]] = None		# 指定列表里面的类型
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item):
+    results = {"item_id": item_id, "item": item}
+    return results
 ```
 
 `FastAPI`期望得到以下格式的回复
 
 ```
 {
-   "name": "su111",
-   "password": "xxxx",
-   "email": "hello world",
-   "avatar": [
-      {
-      "url": "https://google.com/",
-      "name": "google"
-   },
-   {
-      "url": "https://github.com/",
-      "name": "github"
-   }
-   ]
+    "name": "Foo",
+    "description": "The pretender",
+    "price": 42.0,
+    "tax": 3.2,
+    "tags": [
+        "rock",
+        "metal",
+        "bar"
+    ],
+    "images": [
+        {
+            "url": "http://example.com/baz.jpg",
+            "name": "The Foo live"
+        },
+        {
+            "url": "http://example.com/dave.jpg",
+            "name": "The Baz"
+        }
+    ]
 }
-
 ```
 
 ### 深层嵌套模型
 
 ```
+from typing import List, Optional, Set
+
+from fastapi import FastAPI
+from pydantic import BaseModel, HttpUrl, Field
+
+app = FastAPI()
+
+
 class Image(BaseModel):
     url: HttpUrl
     name: str
@@ -838,7 +1091,7 @@ async def create_offer(offer: Offer):
     return offer
 ```
 
-期望得到的回复
+**期望得到的回复**
 
 ```
 {
@@ -884,6 +1137,14 @@ async def create_offer(offer: Offer):
 ### body 传一个列表
 
 ```
+from typing import List
+
+from fastapi import FastAPI
+from pydantic import BaseModel, HttpUrl
+
+app = FastAPI()
+
+
 class Image(BaseModel):
     url: HttpUrl
     name: str
@@ -892,7 +1153,6 @@ class Image(BaseModel):
 @app.post("/images/multiple/")
 async def create_multiple_images(images: List[Image]):
     return images
-
 ```
 
 期望得到的回复
