@@ -4138,3 +4138,27 @@ def test_create_existing_item():
 
 
 
+## 调试
+
+```
+import uvicorn
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
+@app.get("/")
+def root():
+    a = "a"
+    b = "b" + a
+    return {"hello world": b}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+可以使用**vscode**或者**pycharm**`debugging`运行这个文件
+
+
+
