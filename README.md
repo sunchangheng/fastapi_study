@@ -3876,3 +3876,265 @@ async def send_notification(
 
 
 
+## 元数据和文档URL
+
+你可以在你的**FastAPI**应用程序定义几个元数据配置
+
+### Title, description, and version[¶](https://fastapi.tiangolo.com/tutorial/metadata/#title-description-and-version)
+
+```
+from fastapi import FastAPI
+
+app = FastAPI(
+    title="My Super Project",
+    description="This is a very fancy project, with auto docs for the API and everything",
+    version="2.5.0",
+)
+
+
+@app.get("/items/")
+async def read_items():
+    return [{"name": "Foo"}]
+
+```
+
+**通过这个配置，我们的交互式文档将会是下面的样子**
+
+![img](https://fastapi.tiangolo.com/img/tutorial/metadata/image01.png)
+
+### 为标签创建元数据
+
+```
+from fastapi import FastAPI
+
+tags_metadata = [
+    {
+        "name": "users",
+        "description": "Operations with users. The **login** logic is also here.",
+    },
+    {
+        "name": "items",
+        # "description": "Manage items. So _fancy_ they have their own docs.",
+        "description": "管理的items，它们有它们自己的docs.",
+        "externalDocs": {
+            "description": "Items external docs",
+            "url": "https://fastapi.tiangolo.com/",
+        },
+    },
+]
+
+app = FastAPI(openapi_tags=tags_metadata)
+
+
+@app.get("/users/", tags=["users"])
+async def get_users():
+    return [{"name": "Harry"}, {"name": "Ron"}]
+
+
+@app.get("/items/", tags=["items"])
+async def get_items():
+    return [{"name": "wand"}, {"name": "flying broom"}]
+```
+
+**现在你再看一下你的交互式文档，你将会看到下面的效果**
+
+![](https://fastapi.tiangolo.com/img/tutorial/metadata/image02.png)
+
+> 每个标签元数据字典的顺序还定义了docs UI中显示的顺序。
+>
+> 例如，即使`users` 的字母顺序在 `items` 的前面，但是它们的顺序是可以定义的，因为我们可以将`items`的元数据添加为列表中的第一个字典。
+
+### OpenAPI URL[¶](https://fastapi.tiangolo.com/tutorial/metadata/#openapi-url)
+
+默认的，OpenAPI schema 的路径是：`/openapi.json`
+
+但是您可以使用参数`openapi_url`对其进行配置
+
+例如，要将其设置为在`/api/v1/openapi.json`中投放
+
+```
+from fastapi import FastAPI
+
+app = FastAPI(openapi_url="/api/v1/openapi.json")
+
+
+@app.get("/items/")
+async def read_items():
+    return [{"name": "Foo"}]
+```
+
+### Docs URLs
+
+- **Swagger UI**: `/docs`
+  - 你可以通过`docs_url`设置URL
+  - 你还可以通过`docs_url=None`将其禁用
+- ReDoc: `redoc`
+  - 您可以使用参数`redoc_url`设置其URL
+  - 您可以通过设置`redoc_url=None`禁用它
+
+比如，设置 Swagger UI 到`/documentation`
+
+```
+from fastapi import FastAPI
+
+app = FastAPI(docs_url="/documentation", redoc_url=None)
+
+
+@app.get("/items/")
+async def read_items():
+    return [{"name": "Foo"}]
+```
+
+
+
+## 静态文件
+
+您可以使用`StaticFiles`从目录自动提供静态文件
+
+**安装依赖**
+
+```
+pip install aiofiles
+```
+
+**使用**
+
+```
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+```
+
+现在，浏览器只要访问 `/static` 前缀开头的，就可以访问到**static**文件夹下的静态文件
+
+
+
+## 测试
+
+**主文件**
+
+```
+# main_b.py
+from typing import Optional
+
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel
+
+fake_secret_token = "coneofsilence"
+
+fake_db = {
+    "foo": {"id": "foo", "title": "Foo", "description": "There goes my hero"},
+    "bar": {"id": "bar", "title": "Bar", "description": "The bartenders"},
+}
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+
+
+@app.get("/items/{item_id}", response_model=Item)
+async def read_main(item_id: str, x_token: str = Header(...)):
+    if x_token != fake_secret_token:
+        raise HTTPException(status_code=400, detail="Invalid X-Token header")
+    if item_id not in fake_db:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return fake_db[item_id]
+
+
+@app.post("/items/", response_model=Item)
+async def create_item(item: Item, x_token: str = Header(...)):
+    if x_token != fake_secret_token:
+        raise HTTPException(status_code=400, detail="Invalid X-Token header")
+    if item.id in fake_db:
+        raise HTTPException(status_code=400, detail="Item already exists")
+    fake_db[item.id] = item
+    return item
+
+```
+
+**测试文件**
+
+```
+# test_main_b.py
+from fastapi.testclient import TestClient
+
+from .main_b import app
+
+client = TestClient(app)
+
+
+def test_read_item():
+    response = client.get("/items/foo", headers={"X-Token": "coneofsilence"})
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": "foo",
+        "title": "Foo",
+        "description": "There goes my hero",
+    }
+
+
+def test_read_item_bad_token():
+    response = client.get("/items/foo", headers={"X-Token": "hailhydra"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid X-Token header"}
+
+
+def test_read_inexistent_item():
+    response = client.get("/items/baz", headers={"X-Token": "coneofsilence"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Item not found"}
+
+
+def test_create_item():
+    response = client.post(
+        "/items/",
+        headers={"X-Token": "coneofsilence"},
+        json={"id": "foobar", "title": "Foo Bar", "description": "The Foo Barters"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": "foobar",
+        "title": "Foo Bar",
+        "description": "The Foo Barters",
+    }
+
+
+def test_create_item_bad_token():
+    response = client.post(
+        "/items/",
+        headers={"X-Token": "hailhydra"},
+        json={"id": "bazz", "title": "Bazz", "description": "Drop the bazz"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid X-Token header"}
+
+
+def test_create_existing_item():
+    response = client.post(
+        "/items/",
+        headers={"X-Token": "coneofsilence"},
+        json={
+            "id": "foo",
+            "title": "The Foo ID Stealers",
+            "description": "There goes my stealer",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Item already exists"}
+
+```
+
+- `client`向服务端发送参数，可以参照`requests`
+- 测试文件使用`test_`开头
+- **安装依赖**：`pip install pytest`
+- **执行测试**：`pytest`
+
+
+
